@@ -5,23 +5,51 @@ import {
 import { Queue } from "bullmq";
 import { redisConfig } from "./redis-connection";
 
-const myQueue = new Queue("deployments", {
-	connection: redisConfig,
+const myQueue = createQueue("deployments")
+const builderServerQueues = []
+// Query builder server
+const builderServers = await db.query.server.findMany({
+	orderBy: desc(server.createdAt),
+	where: IS_CLOUD
+		? and(
+				isNotNull(server.sshKeyId),
+				eq(server.organizationId, ctx.session.activeOrganizationId),
+				eq(server.serverStatus, "active"),
+				eq(server.serverType, "build"),
+			)
+		: and(
+				isNotNull(server.sshKeyId),
+				eq(server.organizationId, ctx.session.activeOrganizationId),
+				eq(server.serverType, "build"),
+			),
 });
+for(const builderServer of builderServers) {
+	builderServerQueues.append(createQueue(`deployments__${builderServer.serverId}`))
+}
 
 process.on("SIGTERM", () => {
 	myQueue.close();
+	for(const builderServerQueue of builderServerQueues) {
+		builderServerQueue.close()
+	}
 	process.exit(0);
 });
 
-myQueue.on("error", (error) => {
-	if ((error as any).code === "ECONNREFUSED") {
-		console.error(
-			"Make sure you have installed Redis and it is running.",
-			error,
-		);
-	}
-});
+function createQueue(queueName: string) {
+	const queue = new Queue(queueName, {
+		connection: redisConfig,
+	});
+	queue.on("error", (error) => {
+		if ((error as any).code === "ECONNREFUSED") {
+			console.error(
+				"Make sure you have installed Redis and it is running.",
+				error,
+			);
+		}
+	});
+
+	return queue
+}
 
 export const cleanQueuesByApplication = async (applicationId: string) => {
 	const jobs = await myQueue.getJobs(["waiting", "delayed"]);
@@ -72,4 +100,4 @@ export const killDockerBuild = async (
 	}
 };
 
-export { myQueue };
+export { myQueue, ...builderServerQueues };
