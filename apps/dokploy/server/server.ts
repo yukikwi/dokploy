@@ -73,8 +73,16 @@ void app.prepare().then(async () => {
 		console.log(`Server Started on: http://${HOST}:${PORT}`);
 		if (!IS_CLOUD) {
 			console.log("Starting Deployment Worker");
-			const { deploymentWorker } = await import("./queues/deployments-queue");
-			await deploymentWorker.run();
+			const {
+				setupDeploymentWorkers,
+				deploymentManagementWorker,
+				deploymentWorkers,
+			} = await import("./queues/deployments-queue");
+			await setupDeploymentWorkers();
+			deploymentManagementWorker.run();
+			deploymentWorkers.forEach((queueAndWorker) =>
+				queueAndWorker.worker.run(),
+			);
 		}
 	} catch (e) {
 		console.error("Main Server Error", e);
